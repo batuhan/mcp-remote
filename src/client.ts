@@ -12,7 +12,7 @@
 import { EventEmitter } from 'events'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ListResourcesResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
-import { NodeOAuthClientProvider } from './lib/node-oauth-client-provider'
+import { NodeOAuthClientProvider } from 'mcp-remote/src/lib/node-oauth-client-provider'
 import {
   parseCommandLineArgs,
   setupSignalHandlers,

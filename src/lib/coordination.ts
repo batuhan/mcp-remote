@@ -1,4 +1,4 @@
-import { checkLockfile, createLockfile, deleteLockfile, getConfigFilePath, LockfileData } from './mcp-auth-config'
+import { checkLockfile, createLockfile, deleteLockfile, getConfigFilePath, LockfileData } from 'mcp-remote/src/lib/mcp-auth-config'
 import { EventEmitter } from 'events'
 import { Server } from 'http'
 import express from 'express'

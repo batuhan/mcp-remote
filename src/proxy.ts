@@ -21,7 +21,7 @@ import {
   TransportStrategy,
 } from './lib/utils'
 import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './lib/types'
-import { NodeOAuthClientProvider } from './lib/node-oauth-client-provider'
+import { NodeOAuthClientProvider } from 'mcp-remote/src/lib/node-oauth-client-provider'
 import { createLazyAuthCoordinator } from './lib/coordination'
 
 /**

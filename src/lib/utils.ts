@@ -6,7 +6,8 @@ import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
 import { OAuthClientInformationFull, OAuthClientInformationFullSchema, OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { OAuthCallbackServerOptions, StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './types'
-import { getConfigDir, getConfigFilePath, readJsonFile } from './mcp-auth-config'
+import { getConfigDir, getConfigFilePath, readJsonFile } from 'mcp-remote/src/lib/mcp-auth-config'
+import { getServerUrlHash, shouldIncludeTool, findAvailablePort, setupSignalHandlers } from 'mcp-remote/src/lib/utils'
 import express from 'express'
 import net from 'net'
 import crypto from 'crypto'
@@ -567,35 +568,6 @@ function calculateDefaultPort(serverUrlHash: string): number {
   return 3335 + (offset % 45816)
 }
 
-/**
- * Finds an available port on the local machine
- * @param preferredPort Optional preferred port to try first
- * @returns A promise that resolves to an available port number
- */
-export async function findAvailablePort(preferredPort?: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        // If preferred port is in use, get a random port
-        server.listen(0)
-      } else {
-        reject(err)
-      }
-    })
-
-    server.on('listening', () => {
-      const { port } = server.address() as net.AddressInfo
-      server.close(() => {
-        resolve(port)
-      })
-    })
-
-    // Try preferred port first, or get a random port
-    server.listen(preferredPort || 0)
-  })
-}
 
 /**
  * Parses command line arguments for MCP clients and proxies

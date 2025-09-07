@@ -4,7 +4,7 @@ import { Server } from 'http'
 import express from 'express'
 import { AddressInfo } from 'net'
 import { unlinkSync } from 'fs'
-import { log, debugLog, setupOAuthCallbackServerWithLongPoll } from './utils'
+import { log, setupOAuthCallbackServerWithLongPoll } from './utils'
 
 export type AuthCoordinator = {
   initializeAuth: () => Promise<{ server: Server; waitForAuthCode: () => Promise<string>; skipBrowserAuth: boolean }>
@@ -18,10 +18,8 @@ export type AuthCoordinator = {
 export async function isPidRunning(pid: number): Promise<boolean> {
   try {
     process.kill(pid, 0) // Doesn't kill the process, just checks if it exists
-    debugLog(`Process ${pid} is running`)
     return true
   } catch (err) {
-    debugLog(`Process ${pid} is not running`, err)
     return false
   }
 }
@@ -32,30 +30,21 @@ export async function isPidRunning(pid: number): Promise<boolean> {
  * @returns True if the lockfile is valid, false otherwise
  */
 export async function isLockValid(lockData: LockfileData): Promise<boolean> {
-  debugLog('Checking if lockfile is valid', lockData)
-
   // Check if the lockfile is too old (over 30 minutes)
   const MAX_LOCK_AGE = 30 * 60 * 1000 // 30 minutes
   if (Date.now() - lockData.timestamp > MAX_LOCK_AGE) {
     log('Lockfile is too old')
-    debugLog('Lockfile is too old', {
-      age: Date.now() - lockData.timestamp,
-      maxAge: MAX_LOCK_AGE,
-    })
     return false
   }
 
   // Check if the process is still running
   if (!(await isPidRunning(lockData.pid))) {
     log('Process from lockfile is not running')
-    debugLog('Process from lockfile is not running', { pid: lockData.pid })
     return false
   }
 
   // Check if the endpoint is accessible
   try {
-    debugLog('Checking if endpoint is accessible', { port: lockData.port })
-
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 1000)
 
@@ -66,11 +55,9 @@ export async function isLockValid(lockData: LockfileData): Promise<boolean> {
     clearTimeout(timeout)
 
     const isValid = response.status === 200 || response.status === 202
-    debugLog(`Endpoint check result: ${isValid ? 'valid' : 'invalid'}`, { status: response.status })
     return isValid
   } catch (error) {
     log(`Error connecting to auth server: ${(error as Error).message}`)
-    debugLog('Error connecting to auth server', error)
     return false
   }
 }
@@ -89,11 +76,9 @@ export async function waitForAuthentication(port: number): Promise<boolean> {
       attempts++
       const url = `http://127.0.0.1:${port}/wait-for-auth`
       log(`Querying: ${url}`)
-      debugLog(`Poll attempt ${attempts}`)
 
       try {
         const response = await fetch(url)
-        debugLog(`Poll response status: ${response.status}`)
 
         if (response.status === 200) {
           // Auth completed, but we don't return the code anymore
@@ -102,21 +87,18 @@ export async function waitForAuthentication(port: number): Promise<boolean> {
         } else if (response.status === 202) {
           // Continue polling
           log(`Authentication still in progress`)
-          debugLog(`Will retry in 1s`)
           await new Promise((resolve) => setTimeout(resolve, 1000))
         } else {
           log(`Unexpected response status: ${response.status}`)
           return false
         }
       } catch (fetchError) {
-        debugLog(`Fetch error during poll`, fetchError)
         // If we can't connect, we'll try again after a delay
         await new Promise((resolve) => setTimeout(resolve, 2000))
       }
     }
   } catch (error) {
     log(`Error waiting for authentication: ${(error as Error).message}`)
-    debugLog(`Error waiting for authentication`, error)
     return false
   }
 }
@@ -136,41 +118,18 @@ export function createLazyAuthCoordinator(
 ): AuthCoordinator {
   let authState: { server: Server; waitForAuthCode: () => Promise<string>; skipBrowserAuth: boolean } | null = null
   const coordinatorId = Math.random().toString(36).substring(7)
-  debugLog('🎭 CREATE_LAZY_AUTH_COORDINATOR', {
-    coordinatorId,
-    serverUrlHash,
-    callbackPort,
-    authTimeoutMs,
-  })
 
   return {
     initializeAuth: async () => {
       // If auth has already been initialized, return the existing state
       if (authState) {
-        debugLog('♾️ AUTH ALREADY INITIALIZED - REUSING', {
-          coordinatorId,
-          hasServer: !!authState.server,
-          skipBrowserAuth: authState.skipBrowserAuth,
-        })
         return authState
       }
 
       log('Initializing auth coordination on-demand')
-      debugLog('🚀 INITIALIZE_AUTH ON-DEMAND', {
-        coordinatorId,
-        serverUrlHash,
-        callbackPort,
-        timestamp: new Date().toISOString(),
-      })
 
       // Initialize auth using the existing coordinateAuth logic
-      debugLog('🌐 CALLING COORDINATE_AUTH', { coordinatorId })
       authState = await coordinateAuth(serverUrlHash, callbackPort, events, authTimeoutMs)
-      debugLog('✅ AUTH COORDINATION COMPLETED', {
-        coordinatorId,
-        skipBrowserAuth: authState.skipBrowserAuth,
-        hasServer: !!authState.server,
-      })
       return authState
     },
   }
@@ -190,72 +149,32 @@ export async function coordinateAuth(
   authTimeoutMs: number,
 ): Promise<{ server: Server; waitForAuthCode: () => Promise<string>; skipBrowserAuth: boolean }> {
   const sessionId = Math.random().toString(36).substring(7)
-  debugLog('🎭 COORDINATE_AUTH START', {
-    sessionId,
-    serverUrlHash,
-    callbackPort,
-    authTimeoutMs,
-    pid: process.pid,
-    timestamp: new Date().toISOString(),
-  })
 
   // Check for a lockfile (disabled on Windows for the time being)
-  debugLog('🔍 CHECKING FOR LOCKFILE', { sessionId, platform: process.platform })
   const lockData = process.platform === 'win32' ? null : await checkLockfile(serverUrlHash)
-
-  if (process.platform === 'win32') {
-    debugLog('🤖 WINDOWS DETECTED - Skipping lockfile', { sessionId })
-  } else {
-    debugLog('🔒 LOCKFILE CHECK RESULT', {
-      sessionId,
-      found: !!lockData,
-      lockPid: lockData?.pid,
-      lockPort: lockData?.port,
-      lockAge: lockData ? Date.now() - lockData.timestamp : null,
-    })
-  }
 
   // If there's a valid lockfile, try to use the existing auth process
   if (lockData && (await isLockValid(lockData))) {
     log(`Another instance is handling authentication on port ${lockData.port} (pid: ${lockData.pid})`)
-    debugLog('🤝 VALID LOCK FOUND - Using existing auth', {
-      sessionId,
-      lockPid: lockData.pid,
-      lockPort: lockData.port,
-    })
 
     try {
       // Try to wait for the authentication to complete
-      debugLog('⏳ WAITING FOR OTHER INSTANCE AUTH', { sessionId })
       const authCompleted = await waitForAuthentication(lockData.port)
 
       if (authCompleted) {
         log('Authentication completed by another instance. Using tokens from disk')
-        debugLog('✅ OTHER INSTANCE AUTH COMPLETED', { sessionId })
 
         // Setup a dummy server - the client will use tokens directly from disk
         const dummyServer = express().listen(0) // Listen on any available port
         const dummyPort = (dummyServer.address() as AddressInfo).port
-        debugLog('🎭 DUMMY SERVER CREATED', {
-          sessionId,
-          dummyPort,
-        })
 
         // This shouldn't actually be called in normal operation, but provide it for API compatibility
         const dummyWaitForAuthCode = () => {
           log('WARNING: waitForAuthCode called in secondary instance - this is unexpected')
-          debugLog('⚠️ UNEXPECTED WAIT_FOR_AUTH_CODE IN SECONDARY', {
-            sessionId,
-            stack: new Error().stack,
-          })
           // Return a promise that never resolves - the client should use the tokens from disk instead
           return new Promise<string>(() => {})
         }
 
-        debugLog('🏁 RETURNING SECONDARY INSTANCE STATE', {
-          sessionId,
-          skipBrowserAuth: true,
-        })
         return {
           server: dummyServer,
           waitForAuthCode: dummyWaitForAuthCode,
@@ -263,35 +182,20 @@ export async function coordinateAuth(
         }
       } else {
         log('Taking over authentication process...')
-        debugLog('🔄 TAKING OVER AUTH PROCESS', { sessionId })
       }
     } catch (error) {
       log(`Error waiting for authentication: ${error}`)
-      debugLog('❌ ERROR WAITING FOR AUTH', {
-        sessionId,
-        error: error instanceof Error ? error.message : error,
-      })
     }
 
     // If we get here, the other process didn't complete auth successfully
-    debugLog('🗑️ OTHER INSTANCE FAILED - Deleting lockfile', { sessionId })
     await deleteLockfile(serverUrlHash)
   } else if (lockData) {
     // Invalid lockfile, delete it
     log('Found invalid lockfile, deleting it')
-    debugLog('🗑️ INVALID LOCKFILE - Deleting', {
-      sessionId,
-      lockPid: lockData.pid,
-      lockPort: lockData.port,
-    })
     await deleteLockfile(serverUrlHash)
   }
 
   // Create our own lockfile
-  debugLog('🌐 SETTING UP OAUTH CALLBACK SERVER', {
-    sessionId,
-    requestedPort: callbackPort,
-  })
   const { server, waitForAuthCode, authCompletedPromise } = setupOAuthCallbackServerWithLongPoll({
     port: callbackPort,
     path: '/oauth/callback',
@@ -303,21 +207,9 @@ export async function coordinateAuth(
   // Get the actual port the server is running on
   const address = server.address() as AddressInfo
   const actualPort = address.port
-  debugLog('✅ OAUTH SERVER READY', {
-    sessionId,
-    actualPort,
-    requestedPort: callbackPort,
-  })
 
   log(`Creating lockfile for server ${serverUrlHash} with process ${process.pid} on port ${actualPort}`)
-  debugLog('🔒 CREATING LOCKFILE', {
-    sessionId,
-    serverUrlHash,
-    pid: process.pid,
-    port: actualPort,
-  })
   await createLockfile(serverUrlHash, process.pid, actualPort)
-  debugLog('✅ LOCKFILE CREATED', { sessionId })
 
   // Make sure lockfile is deleted on process exit
   const cleanupHandler = async () => {
@@ -326,7 +218,6 @@ export async function coordinateAuth(
       await deleteLockfile(serverUrlHash)
     } catch (error) {
       log(`Error cleaning up lockfile: ${error}`)
-      debugLog('Error cleaning up lockfile', error)
     }
   }
 
@@ -335,23 +226,16 @@ export async function coordinateAuth(
       // Synchronous version for 'exit' event since we can't use async here
       const configPath = getConfigFilePath(serverUrlHash, 'lock.json')
       unlinkSync(configPath)
-      debugLog(`Removed lockfile on exit: ${configPath}`)
     } catch (error) {
-      debugLog(`Error removing lockfile on exit:`, error)
+      // Error removing lockfile on exit
     }
   })
 
   // Also handle SIGINT separately
   process.once('SIGINT', async () => {
-    debugLog('Received SIGINT signal, cleaning up')
     await cleanupHandler()
   })
 
-  debugLog('🏁 AUTH COORDINATION COMPLETE - PRIMARY', {
-    sessionId,
-    skipBrowserAuth: false,
-    hasServer: !!server,
-  })
   return {
     server,
     waitForAuthCode,

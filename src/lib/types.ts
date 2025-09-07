@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events'
 
-
 /**
  * OAuth callback server setup options
  */

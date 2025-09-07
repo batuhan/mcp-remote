@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { parseCommandLineArgs, setupOAuthCallbackServerWithLongPoll } from './utils'
+import { setupOAuthCallbackServerWithLongPoll } from './utils'
+import { parseCommandLineArgs } from 'mcp-remote/src/lib/utils'
 import { mcpProxy } from 'mcp-remote/src/lib/utils'
 import { shouldIncludeTool } from 'mcp-remote/src/lib/utils'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'

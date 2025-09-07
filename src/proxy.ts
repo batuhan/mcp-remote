@@ -11,10 +11,8 @@
 
 import { EventEmitter } from 'events'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  connectToRemoteServer,
-  parseCommandLineArgs,
-} from './lib/utils'
+import { connectToRemoteServer } from './lib/utils'
+import { parseCommandLineArgs } from 'mcp-remote/src/lib/utils'
 import { log, mcpProxy, TransportStrategy } from 'mcp-remote/src/lib/utils'
 import { setupSignalHandlers, getServerUrlHash } from 'mcp-remote/src/lib/utils'
 import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'

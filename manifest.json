@@ -1,9 +1,9 @@
 {
   "dxt_version": "0.1",
-  "name": "beeper-desktop-mcp",
+  "name": "@beeper/mcp-remote",
   "display_name": "Beeper Desktop MCP",
-  "version": "0.1.4",
-  "description": "MCP server for interacting with Beeper Desktop, full access to all your messages and chats across networks.",
+  "version": "0.0.1",
+  "description": "Beeper Desktop MCP gives Claude access to all your messages and chats across 10+ chat networks.",
   "author": {
     "name": "Beeper",
     "email": "help@beeper.com",
@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/beeper/desktop-mcp-relayer"
+    "url": "https://github.com/beeper/mcp-remote"
   },
   "homepage": "https://www.beeper.com/mcp",
   "documentation": "https://developers.beeper.com/desktop-api/mcp",
@@ -31,23 +31,15 @@
         "--debug"
       ],
       "env": {
-        "BEEPER_ACCESS_TOKEN": "${user_config.beeper_access_token}"
+        "BEEPER_DESKTOP_ACCESS_TOKEN": "${user_config.beeper_desktop_access_token}"
       }
     }
   },
   "tools_generated": true,
-  "keywords": [
-    "beeper",
-    "messages",
-    "chat"
-  ],
+  "keywords": ["beeper", "messages", "chat"],
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": [
-      "darwin",
-      "win32",
-      "linux"
-    ],
+    "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
       "node": ">=18.0.0"
     }
@@ -55,15 +47,15 @@
   "user_config": {
     "beeper_desktop_base_url": {
       "type": "string",
-      "title": "Beeper Desktop URL",
-      "description": "URL where Beeper Desktop exposes its local API.",
+      "title": "Beeper Desktop Base URL",
+      "description": "Base URL for Beeper Desktop API. You don't need to change this if you're using the default port (23373).",
       "required": false,
       "default": "http://localhost:23373"
     },
-    "beeper_access_token": {
+    "beeper_desktop_access_token": {
       "type": "string",
-      "title": "Beeper Access Token (optional)",
-      "description": "Provide a token to skip OAuth if you prefer. Leave empty to use local OAuth flow.",
+      "title": "Beeper Desktop access token (optional)",
+      "description": "Override the access token to skip the OAuth flow. Leave empty to use the automated flow.",
       "sensitive": true,
       "required": false
     }

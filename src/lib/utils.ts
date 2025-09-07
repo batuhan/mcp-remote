@@ -4,10 +4,9 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
-import { OAuthClientInformationFull, OAuthClientInformationFullSchema, OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
+import { OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { OAuthCallbackServerOptions } from './types'
-import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'
-import { getConfigDir, getConfigFilePath, readJsonFile } from 'mcp-remote/src/lib/mcp-auth-config'
+import { readJsonFile } from 'mcp-remote/src/lib/mcp-auth-config'
 import {
   REASON_AUTH_NEEDED,
   REASON_TRANSPORT_FALLBACK,
@@ -15,19 +14,11 @@ import {
   DEBUG as ORIGINAL_DEBUG,
   debugLog,
   log,
-  mcpProxy,
   AuthInitializer,
-  getServerUrlHash,
-  shouldIncludeTool,
-  findAvailablePort,
-  setupSignalHandlers
 } from 'mcp-remote/src/lib/utils'
 import express from 'express'
-import fs from 'fs'
-import { readFile, rm } from 'fs/promises'
-import path from 'path'
 import { version as MCP_REMOTE_VERSION } from '../../package.json'
-import { EnvHttpProxyAgent, fetch, Headers, RequestInit, setGlobalDispatcher } from 'undici'
+import { fetch, Headers, RequestInit } from 'undici'
 
 // Global type declaration for typescript
 declare global {
@@ -41,13 +32,6 @@ const pid = process.pid
 
 // Local DEBUG variable that can be modified
 export let DEBUG = ORIGINAL_DEBUG
-
-
-
-
-
-
-
 
 /**
  * Creates and connects to a remote server with OAuth authentication
@@ -211,8 +195,16 @@ export async function connectToRemoteServer(
         debugLog('Recursively reconnecting after auth', { recursionReasons: Array.from(recursionReasons) })
 
         // Recursively call connectToRemoteServer with the updated recursion tracking
-        return connectToRemoteServer(client, serverUrl, authProvider, headers, authInitializer, transportStrategy, authTimeoutMs, recursionReasons)
-
+        return connectToRemoteServer(
+          client,
+          serverUrl,
+          authProvider,
+          headers,
+          authInitializer,
+          transportStrategy,
+          authTimeoutMs,
+          recursionReasons,
+        )
       } catch (authError: any) {
         log('Authorization error:', authError)
         debugLog('Authorization error during finishAuth', {
@@ -332,242 +324,4 @@ export function setupOAuthCallbackServerWithLongPoll(options: OAuthCallbackServe
   }
 
   return { server, authCode, waitForAuthCode, authCompletedPromise }
-}
-
-/**
- * Sets up an Express server to handle OAuth callbacks
- * @param options The server options
- * @returns An object with the server, authCode, and waitForAuthCode function
- */
-
-async function findExistingClientPort(serverUrlHash: string): Promise<number | undefined> {
-  const clientInfo = await readJsonFile<OAuthClientInformationFull>(serverUrlHash, 'client_info.json', OAuthClientInformationFullSchema)
-  if (!clientInfo) {
-    return undefined
-  }
-
-  const localhostRedirectUri = clientInfo.redirect_uris
-    .map((uri) => new URL(uri))
-    .find(({ hostname }) => hostname === 'localhost' || hostname === '127.0.0.1')
-  if (!localhostRedirectUri) {
-    throw new Error('Cannot find localhost callback URI from existing client information')
-  }
-
-  return parseInt(localhostRedirectUri.port)
-}
-
-function calculateDefaultPort(serverUrlHash: string): number {
-  // Convert the first 4 bytes of the serverUrlHash into a port offset
-  const offset = parseInt(serverUrlHash.substring(0, 4), 16)
-  // Pick a consistent but random-seeming port from 3335 to 49151
-  return 3335 + (offset % 45816)
-}
-
-
-/**
- * Parses command line arguments for MCP clients and proxies
- * @param args Command line arguments
- * @param usage Usage message to show on error
- * @returns A promise that resolves to an object with parsed serverUrl, callbackPort and headers
- */
-export async function parseCommandLineArgs(args: string[], usage: string) {
-  // Process headers
-  const headers: Record<string, string> = {}
-  let i = 0
-  while (i < args.length) {
-    if (args[i] === '--header' && i < args.length - 1) {
-      const value = args[i + 1]
-      const match = value.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
-      if (match) {
-        headers[match[1]] = match[2]
-      } else {
-        log(`Warning: ignoring invalid header argument: ${value}`)
-      }
-      args.splice(i, 2)
-      // Do not increment i, as the array has shifted
-      continue
-    }
-    i++
-  }
-
-  const serverUrl = args[0]
-  const specifiedPort = args[1] ? parseInt(args[1]) : undefined
-  const allowHttp = args.includes('--allow-http')
-
-  // Check for debug flag
-  const debug = args.includes('--debug')
-  if (debug) {
-    DEBUG = true
-    log('Debug mode enabled - detailed logs will be written to ~/.mcp-auth/')
-  }
-
-  const enableProxy = args.includes('--enable-proxy')
-  if (enableProxy) {
-    // Use env proxy
-    setGlobalDispatcher(new EnvHttpProxyAgent())
-    log('HTTP proxy support enabled - using system HTTP_PROXY/HTTPS_PROXY environment variables')
-  }
-
-  // Parse transport strategy
-  let transportStrategy: TransportStrategy = 'http-first' // Default
-  const transportIndex = args.indexOf('--transport')
-  if (transportIndex !== -1 && transportIndex < args.length - 1) {
-    const strategy = args[transportIndex + 1]
-    if (strategy === 'sse-only' || strategy === 'http-only' || strategy === 'sse-first' || strategy === 'http-first') {
-      transportStrategy = strategy as TransportStrategy
-      log(`Using transport strategy: ${transportStrategy}`)
-    } else {
-      log(`Warning: Ignoring invalid transport strategy: ${strategy}. Valid values are: sse-only, http-only, sse-first, http-first`)
-    }
-  }
-
-  // Parse host
-  let host = 'localhost' // Default
-  const hostIndex = args.indexOf('--host')
-  if (hostIndex !== -1 && hostIndex < args.length - 1) {
-    host = args[hostIndex + 1]
-    log(`Using callback hostname: ${host}`)
-  }
-
-  let staticOAuthClientMetadata: StaticOAuthClientMetadata = null
-  const staticOAuthClientMetadataIndex = args.indexOf('--static-oauth-client-metadata')
-  if (staticOAuthClientMetadataIndex !== -1 && staticOAuthClientMetadataIndex < args.length - 1) {
-    const staticOAuthClientMetadataArg = args[staticOAuthClientMetadataIndex + 1]
-    if (staticOAuthClientMetadataArg.startsWith('@')) {
-      const filePath = staticOAuthClientMetadataArg.slice(1)
-      staticOAuthClientMetadata = JSON.parse(await readFile(filePath, 'utf8'))
-      log(`Using static OAuth client metadata from file: ${filePath}`)
-    } else {
-      staticOAuthClientMetadata = JSON.parse(staticOAuthClientMetadataArg)
-      log(`Using static OAuth client metadata from string`)
-    }
-  }
-
-  // parse static OAuth client information, if provided
-  // defaults to OAuth dynamic client registration
-  let staticOAuthClientInfo: StaticOAuthClientInformationFull = null
-  const staticOAuthClientInfoIndex = args.indexOf('--static-oauth-client-info')
-  if (staticOAuthClientInfoIndex !== -1 && staticOAuthClientInfoIndex < args.length - 1) {
-    const staticOAuthClientInfoArg = args[staticOAuthClientInfoIndex + 1]
-    if (staticOAuthClientInfoArg.startsWith('@')) {
-      const filePath = staticOAuthClientInfoArg.slice(1)
-      staticOAuthClientInfo = JSON.parse(await readFile(filePath, 'utf8'))
-      log(`Using static OAuth client information from file: ${filePath}`)
-    } else {
-      staticOAuthClientInfo = JSON.parse(staticOAuthClientInfoArg)
-      log(`Using static OAuth client information from string`)
-    }
-  }
-
-  // Parse resource to authorize
-  let authorizeResource = '' // Default
-  const resourceIndex = args.indexOf('--resource')
-  if (resourceIndex !== -1 && resourceIndex < args.length - 1) {
-    authorizeResource = args[resourceIndex + 1]
-    log(`Using authorize resource: ${authorizeResource}`)
-  }
-
-  // Parse ignored tools
-  const ignoredTools: string[] = []
-  let j = 0
-  while (j < args.length) {
-    if (args[j] === '--ignore-tool' && j < args.length - 1) {
-      const toolName = args[j + 1]
-      ignoredTools.push(toolName)
-      log(`Ignoring tool: ${toolName}`)
-      args.splice(j, 2)
-      // Do not increment j, as the array has shifted
-      continue
-    }
-    j++
-  }
-
-  // Parse auth timeout
-  let authTimeoutMs = 30000 // Default 30 seconds
-  const authTimeoutIndex = args.indexOf('--auth-timeout')
-  if (authTimeoutIndex !== -1 && authTimeoutIndex < args.length - 1) {
-    const timeoutSeconds = parseInt(args[authTimeoutIndex + 1], 10)
-    if (!isNaN(timeoutSeconds) && timeoutSeconds > 0) {
-      authTimeoutMs = timeoutSeconds * 1000
-      log(`Using auth callback timeout: ${timeoutSeconds} seconds`)
-    } else {
-      log(`Warning: Ignoring invalid auth timeout value: ${args[authTimeoutIndex + 1]}. Must be a positive number.`)
-    }
-  }
-
-  if (!serverUrl) {
-    log(usage)
-    process.exit(1)
-  }
-
-  const url = new URL(serverUrl)
-  const isLocalhost = (url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.protocol === 'http:'
-
-  if (!(url.protocol == 'https:' || isLocalhost || allowHttp)) {
-    log('Error: Non-HTTPS URLs are only allowed for localhost or when --allow-http flag is provided')
-    log(usage)
-    process.exit(1)
-  }
-  const serverUrlHash = getServerUrlHash(serverUrl)
-
-  // Set server hash globally for debug logging
-  global.currentServerUrlHash = serverUrlHash
-
-  debugLog(`Starting mcp-remote with server URL: ${serverUrl}`)
-
-  const defaultPort = calculateDefaultPort(serverUrlHash)
-
-  // Use the specified port, or the existing client port or fallback to find an available one
-  const [existingClientPort, availablePort] = await Promise.all([findExistingClientPort(serverUrlHash), findAvailablePort(defaultPort)])
-  let callbackPort: number
-
-  if (specifiedPort) {
-    if (existingClientPort && specifiedPort !== existingClientPort) {
-      log(
-        `Warning! Specified callback port of ${specifiedPort}, which conflicts with existing client registration port ${existingClientPort}. Deleting existing client data to force reregistration.`,
-      )
-      await rm(getConfigFilePath(serverUrlHash, 'client_info.json'))
-    }
-    log(`Using specified callback port: ${specifiedPort}`)
-    callbackPort = specifiedPort
-  } else if (existingClientPort) {
-    log(`Using existing client port: ${existingClientPort}`)
-    callbackPort = existingClientPort
-  } else {
-    log(`Using automatically selected callback port: ${availablePort}`)
-    callbackPort = availablePort
-  }
-
-  if (Object.keys(headers).length > 0) {
-    log(`Using custom headers: ${JSON.stringify(headers)}`)
-  }
-  // Replace environment variables in headers
-  // example `Authorization: Bearer ${TOKEN}` will read process.env.TOKEN
-  for (const [key, value] of Object.entries(headers)) {
-    headers[key] = value.replace(/\$\{([^}]+)}/g, (match, envVarName) => {
-      const envVarValue = process.env[envVarName]
-
-      if (envVarValue !== undefined) {
-        log(`Replacing ${match} with environment value in header '${key}'`)
-        return envVarValue
-      } else {
-        log(`Warning: Environment variable '${envVarName}' not found for header '${key}'.`)
-        return ''
-      }
-    })
-  }
-
-  return {
-    serverUrl,
-    callbackPort,
-    headers,
-    transportStrategy,
-    host,
-    debug,
-    staticOAuthClientMetadata,
-    staticOAuthClientInfo,
-    authorizeResource,
-    ignoredTools,
-    authTimeoutMs,
-  }
 }

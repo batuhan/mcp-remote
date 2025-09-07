@@ -1,14 +1,13 @@
 {
-  "name": "beeper-desktop-mcp",
-  "version": "0.1.29",
-  "description": "MCP server for interacting with Beeper Desktop, full access to all your messages and chats across networks.",
+  "name": "@beeper/mcp-remote",
+  "version": "0.0.1",
+  "description": "stdio support for Beeper Desktop's Streamable HTTP MCP server",
   "keywords": [
     "mcp",
     "stdio",
-    "sse",
-    "remote",
-    "oauth",
-    "beeper"
+    "beeper",
+    "chat",
+    "messages"
   ],
   "author": "Beeper <support@beeper.com>",
   "repository": {
@@ -66,7 +65,9 @@
     "dts": true,
     "clean": true,
     "outDir": "dist",
-    "external": ["mcp-remote"]
+    "external": [
+      "mcp-remote"
+    ]
   },
   "vitest": {
     "environment": "node",

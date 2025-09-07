@@ -13,11 +13,8 @@ import { EventEmitter } from 'events'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ListResourcesResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { NodeOAuthClientProvider } from 'mcp-remote/src/lib/node-oauth-client-provider'
-import {
-  parseCommandLineArgs,
-  MCP_REMOTE_VERSION,
-  connectToRemoteServer,
-} from './lib/utils'
+import { MCP_REMOTE_VERSION, connectToRemoteServer } from './lib/utils'
+import { parseCommandLineArgs } from 'mcp-remote/src/lib/utils'
 import { log, TransportStrategy } from 'mcp-remote/src/lib/utils'
 import { setupSignalHandlers, getServerUrlHash } from 'mcp-remote/src/lib/utils'
 import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'

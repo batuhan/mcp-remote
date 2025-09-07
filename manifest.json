@@ -1,9 +1,9 @@
 {
   "dxt_version": "0.1",
-  "name": "beeper-desktop-mcp",
-  "display_name": "Beeper Desktop MCP",
-  "version": "0.1.4",
-  "description": "MCP server for interacting with Beeper Desktop, full access to all your messages and chats across networks.",
+  "name": "@beeper/mcp-remote",
+  "display_name": "Beeper Desktop",
+  "version": "0.0.1",
+  "description": "Beeper Desktop gives Claude access to all your messages and chats across 10+ chat networks. Requires Beeper Desktop to be installed and running on the same device.",
   "author": {
     "name": "Beeper",
     "email": "help@beeper.com",
@@ -11,18 +11,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/beeper/desktop-mcp-relayer"
+    "url": "https://github.com/beeper/mcp-remote"
   },
   "homepage": "https://www.beeper.com/mcp",
   "documentation": "https://developers.beeper.com/desktop-api/mcp",
   "icon": "icon.png",
   "server": {
     "type": "node",
-    "entry_point": "dist/proxy.js",
+    "entry_point": "proxy.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/dist/proxy.js",
+        "${__dirname}/proxy.js",
         "${user_config.beeper_desktop_base_url}/v0/mcp",
         "--transport",
         "http-only",
@@ -31,23 +31,16 @@
         "--debug"
       ],
       "env": {
-        "BEEPER_ACCESS_TOKEN": "${user_config.beeper_access_token}"
+        "MCP_REMOTE_CONFIG_DIR": "${__dirname}/.mcp-auth",
+        "HOME": "${HOME}"
       }
     }
   },
   "tools_generated": true,
-  "keywords": [
-    "beeper",
-    "messages",
-    "chat"
-  ],
+  "keywords": ["beeper", "messages", "chat", "messages", "send", "read", "unread", "history", "communication", "automation"],
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": [
-      "darwin",
-      "win32",
-      "linux"
-    ],
+    "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
       "node": ">=18.0.0"
     }
@@ -55,17 +48,10 @@
   "user_config": {
     "beeper_desktop_base_url": {
       "type": "string",
-      "title": "Beeper Desktop URL",
-      "description": "URL where Beeper Desktop exposes its local API.",
+      "title": "Beeper Desktop Base URL",
+      "description": "Base URL for Beeper Desktop API. You don't need to change this if you're using the default port (23373).",
       "required": false,
       "default": "http://localhost:23373"
-    },
-    "beeper_access_token": {
-      "type": "string",
-      "title": "Beeper Access Token (optional)",
-      "description": "Provide a token to skip OAuth if you prefer. Leave empty to use local OAuth flow.",
-      "sensitive": true,
-      "required": false
     }
   }
 }

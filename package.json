@@ -1,16 +1,21 @@
 {
-  "name": "mcp-remote",
-  "version": "0.1.29",
-  "description": "Remote proxy for Model Context Protocol, allowing local-only clients to connect to remote servers using oAuth",
+  "name": "@beeper/mcp-remote",
+  "version": "0.0.1",
+  "description": "stdio support for Beeper Desktop's Streamable HTTP MCP server",
   "keywords": [
     "mcp",
     "stdio",
-    "sse",
-    "remote",
-    "oauth"
+    "beeper",
+    "chat",
+    "messages"
   ],
-  "author": "Glen Maddern <glen@glenmaddern.com>",
-  "repository": "https://github.com/geelen/mcp-remote",
+  "author": "Beeper <support@beeper.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beeper/desktop-mcp-relayer"
+  },
+  "homepage": "https://www.beeper.com/mcp",
+  "documentation": "https://developers.beeper.com/desktop-api/mcp",
   "type": "module",
   "files": [
     "dist",

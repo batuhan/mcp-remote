@@ -1,9 +1,9 @@
 {
   "dxt_version": "0.1",
   "name": "@beeper/mcp-remote",
-  "display_name": "Beeper Desktop MCP",
+  "display_name": "Beeper Desktop",
   "version": "0.0.1",
-  "description": "Beeper Desktop MCP gives Claude access to all your messages and chats across 10+ chat networks.",
+  "description": "Beeper Desktop gives Claude access to all your messages and chats across 10+ chat networks. Requires Beeper Desktop to be installed and running on the same device.",
   "author": {
     "name": "Beeper",
     "email": "help@beeper.com",
@@ -18,11 +18,11 @@
   "icon": "icon.png",
   "server": {
     "type": "node",
-    "entry_point": "dist/proxy.js",
+    "entry_point": "proxy.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/dist/proxy.js",
+        "${__dirname}/proxy.js",
         "${user_config.beeper_desktop_base_url}/v0/mcp",
         "--transport",
         "http-only",
@@ -37,25 +37,10 @@
     }
   },
   "tools_generated": true,
-  "keywords": [
-    "beeper",
-    "messages",
-    "chat",
-    "messages",
-    "send",
-    "read",
-    "unread",
-    "history",
-    "communication",
-    "automation"
-  ],
+  "keywords": ["beeper", "messages", "chat", "messages", "send", "read", "unread", "history", "communication", "automation"],
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": [
-      "darwin",
-      "win32",
-      "linux"
-    ],
+    "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
       "node": ">=18.0.0"
     }

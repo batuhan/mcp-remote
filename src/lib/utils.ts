@@ -4,9 +4,15 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
-import { OAuthClientInformationFull, OAuthClientInformationFullSchema, OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
+import {
+  OAuthClientInformationFull,
+  OAuthClientInformationFullSchema,
+  OAuthTokens,
+  OAuthTokensSchema,
+} from '@modelcontextprotocol/sdk/shared/auth.js'
 import { OAuthCallbackServerOptions, StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './types'
 import { getConfigDir, getConfigFilePath, readJsonFile } from './mcp-auth-config'
+import { renderHTML } from '../html'
 import express from 'express'
 import net from 'net'
 import crypto from 'crypto'
@@ -301,14 +307,14 @@ export async function connectToRemoteServer(
   const sseTransport = transportStrategy === 'sse-only' || transportStrategy === 'sse-first'
   const transport = sseTransport
     ? new SSEClientTransport(url, {
-        authProvider,
-        requestInit: { headers },
-        eventSourceInit,
-      })
+      authProvider,
+      requestInit: { headers },
+      eventSourceInit,
+    })
     : new StreamableHTTPClientTransport(url, {
-        authProvider,
-        requestInit: { headers },
-      })
+      authProvider,
+      requestInit: { headers },
+    })
 
   try {
     debugLog('Attempting to connect to remote server', { sseTransport })
@@ -411,8 +417,16 @@ export async function connectToRemoteServer(
         debugLog('Recursively reconnecting after auth', { recursionReasons: Array.from(recursionReasons) })
 
         // Recursively call connectToRemoteServer with the updated recursion tracking
-        return connectToRemoteServer(client, serverUrl, authProvider, headers, authInitializer, transportStrategy, authTimeoutMs, recursionReasons)
-
+        return connectToRemoteServer(
+          client,
+          serverUrl,
+          authProvider,
+          headers,
+          authInitializer,
+          transportStrategy,
+          authTimeoutMs,
+          recursionReasons,
+        )
       } catch (authError: any) {
         log('Authorization error:', authError)
         debugLog('Authorization error during finishAuth', {
@@ -499,16 +513,23 @@ export function setupOAuthCallbackServerWithLongPoll(options: OAuthCallbackServe
     log('Auth code received, resolving promise')
     authCompletedResolve(code)
 
-    res.send(`
-      Authorization successful!
-      You may close this window and return to the CLI.
-      <script>
-        // If this is a non-interactive session (no manual approval step was required) then
-        // this should automatically close the window. If not, this will have no effect and
-        // the user will see the message above.
-        window.close();
-      </script>
-    `)
+    res.send(
+      renderHTML({
+        title: 'Connection successful',
+        body: `<meta http-equiv="refresh" content="0;url=claude://">
+<div class="message">
+  <a href="beeper://">Beeper Desktop</a> is connected. You can now go back to <a href="claude://">Claude Desktop</a>.
+</div>
+<script>
+  window.location.href = 'claude://';
+
+  // If this is a non-interactive session (no manual approval step was required) then
+  // this should automatically close the window. If not, this will have no effect and
+  // the user will see the message above.
+  window.close();
+</script>`,
+      }),
+    )
 
     // Notify main flow that auth code is available
     options.events.emit('auth-code-received', code)

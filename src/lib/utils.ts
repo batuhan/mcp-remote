@@ -4,7 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
-import { OAuthClientInformationFull, OAuthClientInformationFullSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
+import { OAuthClientInformationFull, OAuthClientInformationFullSchema, OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { OAuthCallbackServerOptions, StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './types'
 import { getConfigDir, getConfigFilePath, readJsonFile } from './mcp-auth-config'
 import express from 'express'
@@ -267,6 +267,7 @@ export async function connectToRemoteServer(
   headers: Record<string, string>,
   authInitializer: AuthInitializer,
   transportStrategy: TransportStrategy = 'http-first',
+  authTimeoutMs?: number,
   recursionReasons: Set<string> = new Set(),
 ): Promise<Transport> {
   log(`[${pid}] Connecting to remote server: ${serverUrl}`)
@@ -364,6 +365,7 @@ export async function connectToRemoteServer(
         headers,
         authInitializer,
         sseTransport ? 'http-only' : 'sse-only',
+        authTimeoutMs,
         recursionReasons,
       )
     } else if (error instanceof UnauthorizedError || (error instanceof Error && error.message.includes('Unauthorized'))) {
@@ -379,44 +381,92 @@ export async function connectToRemoteServer(
       const { waitForAuthCode, skipBrowserAuth } = await authInitializer()
 
       if (skipBrowserAuth) {
-        log('Authentication required but skipping browser auth - using shared auth')
-      } else {
-        log('Authentication required. Waiting for authorization...')
-      }
+        log('Authentication required but skipping browser auth - waiting for tokens written by another instance')
+        debugLog('Secondary instance: starting token polling loop')
 
-      // Wait for the authorization code from the callback
-      debugLog('Waiting for auth code from callback server')
-      const code = await waitForAuthCode()
-      debugLog('Received auth code from callback server')
+        const deadline = Date.now() + (authTimeoutMs || 30000)
+        while (Date.now() < deadline) {
+          try {
+            const tokens = await authProvider.tokens?.()
+            const ready = !!tokens?.access_token
+            debugLog('Token polling check', { ready })
+            if (ready) break
+          } catch (tokenError) {
+            debugLog('Error checking tokens during polling', { error: (tokenError as Error).message })
+          }
+          await new Promise((r) => setTimeout(r, 200))
+        }
 
-      try {
-        log('Completing authorization...')
-        await transport.finishAuth(code)
-        debugLog('Authorization completed successfully')
-
+        // After polling completes, attempt reconnection
         if (recursionReasons.has(REASON_AUTH_NEEDED)) {
           const errorMessage = `Already attempted reconnection for reason: ${REASON_AUTH_NEEDED}. Giving up.`
           log(errorMessage)
-          debugLog('Already attempted auth reconnection, giving up', {
+          debugLog('Already attempted auth reconnection (secondary), giving up', {
             recursionReasons: Array.from(recursionReasons),
           })
           throw new Error(errorMessage)
         }
 
-        // Track this reason for recursion
         recursionReasons.add(REASON_AUTH_NEEDED)
         log(`Recursively reconnecting for reason: ${REASON_AUTH_NEEDED}`)
-        debugLog('Recursively reconnecting after auth', { recursionReasons: Array.from(recursionReasons) })
+        debugLog('Recursively reconnecting after tokens detected', { recursionReasons: Array.from(recursionReasons) })
 
-        // Recursively call connectToRemoteServer with the updated recursion tracking
-        return connectToRemoteServer(client, serverUrl, authProvider, headers, authInitializer, transportStrategy, recursionReasons)
-      } catch (authError: any) {
-        log('Authorization error:', authError)
-        debugLog('Authorization error during finishAuth', {
-          errorMessage: authError.message,
-          stack: authError.stack,
-        })
-        throw authError
+        return connectToRemoteServer(
+          client,
+          serverUrl,
+          authProvider,
+          headers,
+          authInitializer,
+          transportStrategy,
+          authTimeoutMs,
+          recursionReasons,
+        )
+      } else {
+        log('Authentication required. Waiting for authorization...')
+
+        // Wait for the authorization code from the callback
+        debugLog('Waiting for auth code from callback server')
+        const code = await waitForAuthCode()
+        debugLog('Received auth code from callback server')
+
+        try {
+          log('Completing authorization...')
+          await transport.finishAuth(code)
+          debugLog('Authorization completed successfully')
+
+          if (recursionReasons.has(REASON_AUTH_NEEDED)) {
+            const errorMessage = `Already attempted reconnection for reason: ${REASON_AUTH_NEEDED}. Giving up.`
+            log(errorMessage)
+            debugLog('Already attempted auth reconnection, giving up', {
+              recursionReasons: Array.from(recursionReasons),
+            })
+            throw new Error(errorMessage)
+          }
+
+          // Track this reason for recursion
+          recursionReasons.add(REASON_AUTH_NEEDED)
+          log(`Recursively reconnecting for reason: ${REASON_AUTH_NEEDED}`)
+          debugLog('Recursively reconnecting after auth', { recursionReasons: Array.from(recursionReasons) })
+
+          // Recursively call connectToRemoteServer with the updated recursion tracking
+          return connectToRemoteServer(
+            client,
+            serverUrl,
+            authProvider,
+            headers,
+            authInitializer,
+            transportStrategy,
+            authTimeoutMs,
+            recursionReasons,
+          )
+        } catch (authError: any) {
+          log('Authorization error:', authError)
+          debugLog('Authorization error during finishAuth', {
+            errorMessage: authError.message,
+            stack: authError.stack,
+          })
+          throw authError
+        }
       }
     } else {
       log('Connection error:', error)
@@ -445,44 +495,51 @@ export function setupOAuthCallbackServerWithLongPoll(options: OAuthCallbackServe
     authCompletedResolve = resolve
   })
 
+  async function areTokensReady(): Promise<boolean> {
+    try {
+      const tokens = await readJsonFile<OAuthTokens>(options.serverUrlHash, 'tokens.json', OAuthTokensSchema)
+      const ready = !!tokens?.access_token
+      if (ready) {
+        debugLog('Tokens detected on disk - token-ready state reached')
+      }
+      return ready
+    } catch (e) {
+      debugLog('Error checking tokens readiness', { error: (e as Error).message })
+      return false
+    }
+  }
+
   // Long-polling endpoint
-  app.get('/wait-for-auth', (req, res) => {
-    if (authCode) {
-      // Auth already completed - just return 200 without the actual code
-      // Secondary instances will read tokens from disk
-      log('Auth already completed, returning 200')
-      res.status(200).send('Authentication completed')
-      return
+  app.get('/wait-for-auth', async (req, res) => {
+    const pollingRequested = req.query.poll !== 'false'
+
+    if (!pollingRequested) {
+      debugLog('Client requested no long poll for /wait-for-auth')
+      // Non-polling request: only report completion if tokens are ready
+      if (await areTokensReady()) {
+        log('Tokens ready - responding 200 to immediate status check')
+        return res.status(200).send('Authentication completed')
+      }
+      return res.status(202).send('Authentication in progress')
     }
 
-    if (req.query.poll === 'false') {
-      log('Client requested no long poll, responding with 202')
-      res.status(202).send('Authentication in progress')
-      return
+    debugLog('Starting /wait-for-auth long poll')
+    const deadline = Date.now() + (options.authTimeoutMs || 30000)
+    while (Date.now() < deadline) {
+      if (authCode && (await areTokensReady())) {
+        log('Auth code present and tokens ready - responding 200')
+        return res.status(200).send('Authentication completed')
+      }
+      await new Promise((r) => setTimeout(r, options.tokenReadyPollMs ?? 200))
     }
+    debugLog('Long poll deadline reached - responding 202')
+    return res.status(202).send('Authentication in progress')
+  })
 
-    // Long poll - wait for up to 30 seconds
-    const longPollTimeout = setTimeout(() => {
-      log('Long poll timeout reached, responding with 202')
-      res.status(202).send('Authentication in progress')
-    }, options.authTimeoutMs || 30000)
-
-    // If auth completes while we're waiting, send the response immediately
-    authCompletedPromise
-      .then(() => {
-        clearTimeout(longPollTimeout)
-        if (!res.headersSent) {
-          log('Auth completed during long poll, responding with 200')
-          res.status(200).send('Authentication completed')
-        }
-      })
-      .catch(() => {
-        clearTimeout(longPollTimeout)
-        if (!res.headersSent) {
-          log('Auth failed during long poll, responding with 500')
-          res.status(500).send('Authentication failed')
-        }
-      })
+  // Optional: direct endpoint to check token readiness (useful for debugging)
+  app.get('/tokens-ready', async (_req, res) => {
+    if (await areTokensReady()) return res.status(200).send('Tokens ready')
+    return res.status(202).send('Tokens not ready')
   })
 
   // OAuth callback endpoint

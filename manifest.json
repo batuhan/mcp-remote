@@ -1,0 +1,71 @@
+{
+  "dxt_version": "0.1",
+  "name": "beeper-desktop-mcp",
+  "display_name": "Beeper Desktop MCP",
+  "version": "0.1.4",
+  "description": "MCP server for interacting with Beeper Desktop, full access to all your messages and chats across networks.",
+  "author": {
+    "name": "Beeper",
+    "email": "help@beeper.com",
+    "url": "https://www.beeper.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beeper/desktop-mcp-relayer"
+  },
+  "homepage": "https://www.beeper.com/mcp",
+  "documentation": "https://developers.beeper.com/desktop-api/mcp",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/proxy.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/proxy.js",
+        "${user_config.beeper_desktop_base_url}/v0/mcp",
+        "--transport",
+        "http-only",
+        "--static-oauth-client-metadata",
+        "{ \"scope\": \"read write\" }",
+        "--debug"
+      ],
+      "env": {
+        "BEEPER_ACCESS_TOKEN": "${user_config.beeper_access_token}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "keywords": [
+    "beeper",
+    "messages",
+    "chat"
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "user_config": {
+    "beeper_desktop_base_url": {
+      "type": "string",
+      "title": "Beeper Desktop URL",
+      "description": "URL where Beeper Desktop exposes its local API.",
+      "required": false,
+      "default": "http://localhost:23373"
+    },
+    "beeper_access_token": {
+      "type": "string",
+      "title": "Beeper Access Token (optional)",
+      "description": "Provide a token to skip OAuth if you prefer. Leave empty to use local OAuth flow.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

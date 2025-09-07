@@ -892,6 +892,7 @@ describe('setupOAuthCallbackServerWithLongPoll', () => {
       path: '/oauth/callback',
       events,
       authTimeoutMs: customTimeout,
+      serverUrlHash: 'testhash',
     })
 
     server = result.server
@@ -906,6 +907,7 @@ describe('setupOAuthCallbackServerWithLongPoll', () => {
       port: 0, // Use any available port
       path: '/oauth/callback',
       events,
+      serverUrlHash: 'testhash',
     })
 
     server = result.server

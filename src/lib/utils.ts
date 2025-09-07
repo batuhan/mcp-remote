@@ -39,10 +39,44 @@ function getTimestamp(): string {
   return now.toISOString()
 }
 
+// Debug logging function
+export function debugLog(message: string, ...args: any[]) {
+  if (!DEBUG) return
+
+  const serverUrlHash = global.currentServerUrlHash
+  if (!serverUrlHash) {
+    console.error('[DEBUG LOG ERROR] global.currentServerUrlHash is not set. Cannot write debug log.')
+    return
+  }
+
+  try {
+    // Format with timestamp and PID
+    const formattedMessage = `[${getTimestamp()}][${pid}] ${message}`
+
+    // Log to console
+    console.error(formattedMessage, ...args)
+
+    // Ensure config directory exists
+    const configDir = getConfigDir()
+    fs.mkdirSync(configDir, { recursive: true })
+
+    // Append to log file
+    const logPath = path.join(configDir, `${serverUrlHash}_debug.log`)
+    const logMessage = `${formattedMessage} ${args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' ')}\n`
+
+    fs.appendFileSync(logPath, logMessage, { encoding: 'utf8' })
+  } catch (error) {
+    // Fallback to console if file logging fails
+    console.error(`[DEBUG LOG ERROR] ${error}`)
+  }
+}
 
 export function log(str: string, ...rest: unknown[]) {
   // Using stderr so that it doesn't interfere with stdout
   console.error(`[${pid}] ${str}`, ...rest)
+
+  // If debug mode is on, also log to debug file
+  debugLog(str, ...rest)
 }
 
 type Message = any
@@ -142,10 +176,18 @@ export function mcpProxy({
 
     log('[Local→Remote]', message.method || message.id)
 
+    debugLog('Local → Remote message', {
+      method: message.method,
+      id: message.id,
+      params: message.params ? JSON.stringify(message.params).substring(0, 500) : undefined,
+    })
+
     if (message.method === 'initialize') {
       const { clientInfo } = message.params
       if (clientInfo) clientInfo.name = `${clientInfo.name} (via mcp-remote ${MCP_REMOTE_VERSION})`
       log(JSON.stringify(message, null, 2))
+
+      debugLog('Initialize message with modified client info', { clientInfo })
     }
 
     transportToServer.send(message).catch(onServerError)
@@ -156,6 +198,13 @@ export function mcpProxy({
     const message = messageTransformer.interceptResponse(_message as any)
     log('[Remote→Local]', message.method || message.id)
 
+    debugLog('Remote → Local message', {
+      method: message.method,
+      id: message.id,
+      result: message.result ? 'result-present' : undefined,
+      error: message.error,
+    })
+
     transportToClient.send(message).catch(onClientError)
   }
 
@@ -165,6 +214,7 @@ export function mcpProxy({
     }
 
     transportToClientClosed = true
+    debugLog('Local transport closed, closing remote transport')
     transportToServer.close().catch(onServerError)
   }
 
@@ -173,6 +223,7 @@ export function mcpProxy({
       return
     }
     transportToServerClosed = true
+    debugLog('Remote transport closed, closing local transport')
     transportToClient.close().catch(onClientError)
   }
 
@@ -181,10 +232,12 @@ export function mcpProxy({
 
   function onClientError(error: Error) {
     log('Error from local client:', error)
+    debugLog('Error from local client', { stack: error.stack })
   }
 
   function onServerError(error: Error) {
     log('Error from remote server:', error)
+    debugLog('Error from remote server', { stack: error.stack })
   }
 }
 
@@ -258,15 +311,20 @@ export async function connectToRemoteServer(
       })
 
   try {
+    debugLog('Attempting to connect to remote server', { sseTransport })
+
     if (client) {
+      debugLog('Connecting client to transport')
       await client.connect(transport)
     } else {
+      debugLog('Starting transport directly')
       await transport.start()
       if (!sseTransport) {
         // Extremely hacky, but we didn't actually send a request when calling transport.start() above, so we don't
         // know if we're even talking to an HTTP server. But if we forced that now we'd get an error later saying that
         // the client is already connected. So let's just create a one-off client to make a single request and figure
         // out if we're actually talking to an HTTP server or not.
+        debugLog('Creating test transport for HTTP-only connection test')
         const testTransport = new StreamableHTTPClientTransport(url, { authProvider, requestInit: { headers } })
         const testClient = new Client({ name: 'mcp-remote-fallback-test', version: '0.0.0' }, { capabilities: {} })
         await testClient.connect(testTransport)
@@ -312,83 +370,64 @@ export async function connectToRemoteServer(
       )
     } else if (error instanceof UnauthorizedError || (error instanceof Error && error.message.includes('Unauthorized'))) {
       log('Authentication required. Initializing auth...')
+      debugLog('Authentication error detected', {
+        errorCode: error instanceof OAuthError ? error.errorCode : undefined,
+        errorMessage: error.message,
+        stack: error.stack,
+      })
 
       // Initialize authentication on-demand
+      debugLog('Calling authInitializer to start auth flow')
       const { waitForAuthCode, skipBrowserAuth } = await authInitializer()
 
       if (skipBrowserAuth) {
-        log('Authentication required but skipping browser auth - waiting for tokens written by another instance')
+        log('Authentication required but skipping browser auth - using shared auth')
+      } else {
+        log('Authentication required. Waiting for authorization...')
+      }
 
-        const deadline = Date.now() + (authTimeoutMs || 30000)
-        while (Date.now() < deadline) {
-          try {
-            const tokens = await authProvider.tokens?.()
-            const ready = !!tokens?.access_token
-            if (ready) break
-          } catch (tokenError) {
-            // Error checking tokens during polling
-          }
-          await new Promise((r) => setTimeout(r, 200))
-        }
+      // Wait for the authorization code from the callback
+      debugLog('Waiting for auth code from callback server')
+      const code = await waitForAuthCode()
+      debugLog('Received auth code from callback server')
 
-        // After polling completes, attempt reconnection
+      try {
+        log('Completing authorization...')
+        await transport.finishAuth(code)
+        debugLog('Authorization completed successfully')
+
         if (recursionReasons.has(REASON_AUTH_NEEDED)) {
           const errorMessage = `Already attempted reconnection for reason: ${REASON_AUTH_NEEDED}. Giving up.`
           log(errorMessage)
+          debugLog('Already attempted auth reconnection, giving up', {
+            recursionReasons: Array.from(recursionReasons),
+          })
           throw new Error(errorMessage)
         }
 
+        // Track this reason for recursion
         recursionReasons.add(REASON_AUTH_NEEDED)
         log(`Recursively reconnecting for reason: ${REASON_AUTH_NEEDED}`)
+        debugLog('Recursively reconnecting after auth', { recursionReasons: Array.from(recursionReasons) })
 
-        return connectToRemoteServer(
-          client,
-          serverUrl,
-          authProvider,
-          headers,
-          authInitializer,
-          transportStrategy,
-          authTimeoutMs,
-          recursionReasons,
-        )
-      } else {
-        log('Authentication required. Waiting for authorization...')
+        // Recursively call connectToRemoteServer with the updated recursion tracking
+        return connectToRemoteServer(client, serverUrl, authProvider, headers, authInitializer, transportStrategy, authTimeoutMs, recursionReasons)
 
-        // Wait for the authorization code from the callback
-        const code = await waitForAuthCode()
-
-        try {
-          log('Completing authorization...')
-          await transport.finishAuth(code)
-
-          if (recursionReasons.has(REASON_AUTH_NEEDED)) {
-            const errorMessage = `Already attempted reconnection for reason: ${REASON_AUTH_NEEDED}. Giving up.`
-            log(errorMessage)
-            throw new Error(errorMessage)
-          }
-
-          // Track this reason for recursion
-          recursionReasons.add(REASON_AUTH_NEEDED)
-          log(`Recursively reconnecting for reason: ${REASON_AUTH_NEEDED}`)
-
-          // Recursively call connectToRemoteServer with the updated recursion tracking
-          return connectToRemoteServer(
-            client,
-            serverUrl,
-            authProvider,
-            headers,
-            authInitializer,
-            transportStrategy,
-            authTimeoutMs,
-            recursionReasons,
-          )
-        } catch (authError: any) {
-          log('Authorization error:', authError)
-          throw authError
-        }
+      } catch (authError: any) {
+        log('Authorization error:', authError)
+        debugLog('Authorization error during finishAuth', {
+          errorMessage: authError.message,
+          stack: authError.stack,
+        })
+        throw authError
       }
     } else {
       log('Connection error:', error)
+      debugLog('Connection error', {
+        errorMessage: error.message,
+        stack: error.stack,
+        transportType: transport.constructor.name,
+      })
       throw error
     }
   }
@@ -706,6 +745,8 @@ export async function parseCommandLineArgs(args: string[], usage: string) {
 
   // Set server hash globally for debug logging
   global.currentServerUrlHash = serverUrlHash
+
+  debugLog(`Starting mcp-remote with server URL: ${serverUrl}`)
 
   const defaultPort = calculateDefaultPort(serverUrlHash)
 

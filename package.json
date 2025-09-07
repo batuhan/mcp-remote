@@ -34,7 +34,8 @@
     "express": "^4.21.2",
     "open": "^10.1.0",
     "strict-url-sanitise": "^0.0.1",
-    "undici": "^7.12.0"
+    "undici": "^7.12.0",
+    "mcp-remote": "github:geelen/mcp-remote#ce68351da4991bb795c2cccb94bf3649e5843cf4"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.17.3",

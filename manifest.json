@@ -28,15 +28,30 @@
         "http-only",
         "--static-oauth-client-metadata",
         "{ \"scope\": \"read write\" }",
+        "--header",
+        "Authorization: Bearer ${user_config.beeper_desktop_access_token}",
         "--debug"
       ],
       "env": {
-        "BEEPER_DESKTOP_ACCESS_TOKEN": "${user_config.beeper_desktop_access_token}"
+        "BEEPER_DESKTOP_ACCESS_TOKEN": "${user_config.beeper_desktop_access_token}",
+        "MCP_REMOTE_CONFIG_DIR": "${__dirname}/.mcp-auth",
+        "HOME": "${HOME}"
       }
     }
   },
   "tools_generated": true,
-  "keywords": ["beeper", "messages", "chat"],
+  "keywords": [
+    "beeper",
+    "messages",
+    "chat",
+    "messages",
+    "send",
+    "read",
+    "unread",
+    "history",
+    "communication",
+    "automation"
+  ],
   "compatibility": {
     "claude_desktop": ">=0.10.0",
     "platforms": ["darwin", "win32", "linux"],

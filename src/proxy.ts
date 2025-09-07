@@ -48,7 +48,7 @@ async function runProxy(
     serverUrl,
     callbackPort,
     host,
-    clientName: 'MCP CLI Proxy',
+    clientName: 'Claude Desktop',
     staticOAuthClientMetadata,
     staticOAuthClientInfo,
     authorizeResource,

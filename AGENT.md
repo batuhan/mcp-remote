@@ -1,11 +1,11 @@
-# AGENT.md - mcp-remote Development Guide
+# AGENT.md - @beeper/mcp-remote Development Guide
 
 ## Commands
 
-- **Build**: `pnpm build` (or `pnpm build:watch` for development)
-- **Type check**: `pnpm check` (runs prettier and tsc)
-- **Lint/Format**: `pnpm lint-fix` (prettier with write)
-- **Test**: `pnpm test:unit` (or `pnpm test:unit:watch` for watch mode)
+- **Build**: `yarn build` (or `yarn build:watch` for development)
+- **Type check**: `yarn check` (runs prettier and tsc)
+- **Lint/Format**: `yarn lint-fix` (prettier with write)
+- **Test**: `yarn test:unit` (or `yarn test:unit:watch` for watch mode)
 - **Run dev**: `npx tsx src/client.ts` or `npx tsx src/proxy.ts`
 
 ## Architecture

@@ -13,14 +13,11 @@ import { EventEmitter } from 'events'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   connectToRemoteServer,
-  log,
-  mcpProxy,
   parseCommandLineArgs,
-  setupSignalHandlers,
-  getServerUrlHash,
-  TransportStrategy,
 } from './lib/utils'
-import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './lib/types'
+import { log, mcpProxy, TransportStrategy } from 'mcp-remote/src/lib/utils'
+import { setupSignalHandlers, getServerUrlHash } from 'mcp-remote/src/lib/utils'
+import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'
 import { NodeOAuthClientProvider } from 'mcp-remote/src/lib/node-oauth-client-provider'
 import { createLazyAuthCoordinator } from './lib/coordination'
 

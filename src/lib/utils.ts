@@ -5,12 +5,24 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js'
 import { OAuthClientInformationFull, OAuthClientInformationFullSchema, OAuthTokens, OAuthTokensSchema } from '@modelcontextprotocol/sdk/shared/auth.js'
-import { OAuthCallbackServerOptions, StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './types'
+import { OAuthCallbackServerOptions } from './types'
+import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'
 import { getConfigDir, getConfigFilePath, readJsonFile } from 'mcp-remote/src/lib/mcp-auth-config'
-import { getServerUrlHash, shouldIncludeTool, findAvailablePort, setupSignalHandlers } from 'mcp-remote/src/lib/utils'
+import {
+  REASON_AUTH_NEEDED,
+  REASON_TRANSPORT_FALLBACK,
+  TransportStrategy,
+  DEBUG as ORIGINAL_DEBUG,
+  debugLog,
+  log,
+  mcpProxy,
+  AuthInitializer,
+  getServerUrlHash,
+  shouldIncludeTool,
+  findAvailablePort,
+  setupSignalHandlers
+} from 'mcp-remote/src/lib/utils'
 import express from 'express'
-import net from 'net'
-import crypto from 'crypto'
 import fs from 'fs'
 import { readFile, rm } from 'fs/promises'
 import path from 'path'
@@ -22,233 +34,20 @@ declare global {
   var currentServerUrlHash: string | undefined
 }
 
-// Connection constants
-export const REASON_AUTH_NEEDED = 'authentication-needed'
-export const REASON_TRANSPORT_FALLBACK = 'falling-back-to-alternate-transport'
-
-// Transport strategy types
-export type TransportStrategy = 'sse-only' | 'http-only' | 'sse-first' | 'http-first'
+// Re-export MCP_REMOTE_VERSION from package.json
 export { MCP_REMOTE_VERSION }
 
 const pid = process.pid
-// Global debug flag
-export let DEBUG = false
 
-// Helper function for timestamp formatting
-function getTimestamp(): string {
-  const now = new Date()
-  return now.toISOString()
-}
+// Local DEBUG variable that can be modified
+export let DEBUG = ORIGINAL_DEBUG
 
-// Debug logging function
-export function debugLog(message: string, ...args: any[]) {
-  if (!DEBUG) return
 
-  const serverUrlHash = global.currentServerUrlHash
-  if (!serverUrlHash) {
-    console.error('[DEBUG LOG ERROR] global.currentServerUrlHash is not set. Cannot write debug log.')
-    return
-  }
 
-  try {
-    // Format with timestamp and PID
-    const formattedMessage = `[${getTimestamp()}][${pid}] ${message}`
 
-    // Log to console
-    console.error(formattedMessage, ...args)
 
-    // Ensure config directory exists
-    const configDir = getConfigDir()
-    fs.mkdirSync(configDir, { recursive: true })
 
-    // Append to log file
-    const logPath = path.join(configDir, `${serverUrlHash}_debug.log`)
-    const logMessage = `${formattedMessage} ${args.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' ')}\n`
 
-    fs.appendFileSync(logPath, logMessage, { encoding: 'utf8' })
-  } catch (error) {
-    // Fallback to console if file logging fails
-    console.error(`[DEBUG LOG ERROR] ${error}`)
-  }
-}
-
-export function log(str: string, ...rest: unknown[]) {
-  // Using stderr so that it doesn't interfere with stdout
-  console.error(`[${pid}] ${str}`, ...rest)
-
-  // If debug mode is on, also log to debug file
-  debugLog(str, ...rest)
-}
-
-type Message = any
-const MESSAGE_BLOCKED = Symbol('MessageBlocked')
-const isMessageBlocked = (value: any): value is typeof MESSAGE_BLOCKED => value === MESSAGE_BLOCKED
-
-export function createMessageTransformer({
-  transformRequestFunction,
-  transformResponseFunction,
-}: {
-  transformRequestFunction?: null | ((request: Message) => Message | typeof MESSAGE_BLOCKED)
-  transformResponseFunction?: null | ((request: Message, response: Message) => Message)
-} = {}) {
-  const pendingRequests = new Map<string, Message>()
-
-  const interceptRequest = (message: Message) => {
-    const messageId = message.id
-    if (!messageId) return message
-    pendingRequests.set(messageId, message)
-    return transformRequestFunction?.(message) ?? message
-  }
-
-  const interceptResponse = (message: Message) => {
-    const messageId = message.id
-    if (!messageId) return message
-    const originalRequest = pendingRequests.get(messageId)
-    pendingRequests.delete(messageId)
-    return transformResponseFunction?.(originalRequest, message) ?? message
-  }
-
-  return {
-    interceptRequest,
-    interceptResponse,
-  }
-}
-
-/**
- * Creates a bidirectional proxy between two transports
- * @param params The transport connections to proxy between
- */
-export function mcpProxy({
-  transportToClient,
-  transportToServer,
-  ignoredTools = [],
-}: {
-  transportToClient: Transport
-  transportToServer: Transport
-  ignoredTools?: string[]
-}) {
-  let transportToClientClosed = false
-  let transportToServerClosed = false
-
-  const messageTransformer = createMessageTransformer({
-    transformRequestFunction: (request: Message) => {
-      // Block tools/call for ignored tools
-      if (request.method === 'tools/call' && request.params?.name) {
-        const toolName = request.params.name
-        if (!shouldIncludeTool(ignoredTools, toolName)) {
-          // Send error response back to client immediately
-          const errorResponse = {
-            jsonrpc: '2.0' as const,
-            id: request.id,
-            error: {
-              code: -32603,
-              message: `Tool "${toolName}" is not available`,
-            },
-          }
-          transportToClient.send(errorResponse).catch(onClientError)
-          // Return symbol to indicate this request should not be forwarded
-          return MESSAGE_BLOCKED
-        }
-      }
-      return request
-    },
-    transformResponseFunction: (req: Message, res: Message) => {
-      if (req.method === 'tools/list') {
-        return {
-          ...res,
-          result: {
-            ...res.result,
-            tools: res.result.tools.filter((tool: any) => shouldIncludeTool(ignoredTools, tool.name)),
-          },
-        }
-      }
-      return res
-    },
-  })
-
-  transportToClient.onmessage = (_message) => {
-    // TODO: fix types
-    const message = messageTransformer.interceptRequest(_message as any)
-
-    // If interceptor returns MESSAGE_BLOCKED, don't forward the message
-    if (isMessageBlocked(message)) {
-      return
-    }
-
-    log('[Local→Remote]', message.method || message.id)
-
-    debugLog('Local → Remote message', {
-      method: message.method,
-      id: message.id,
-      params: message.params ? JSON.stringify(message.params).substring(0, 500) : undefined,
-    })
-
-    if (message.method === 'initialize') {
-      const { clientInfo } = message.params
-      if (clientInfo) clientInfo.name = `${clientInfo.name} (via mcp-remote ${MCP_REMOTE_VERSION})`
-      log(JSON.stringify(message, null, 2))
-
-      debugLog('Initialize message with modified client info', { clientInfo })
-    }
-
-    transportToServer.send(message).catch(onServerError)
-  }
-
-  transportToServer.onmessage = (_message) => {
-    // TODO: fix types
-    const message = messageTransformer.interceptResponse(_message as any)
-    log('[Remote→Local]', message.method || message.id)
-
-    debugLog('Remote → Local message', {
-      method: message.method,
-      id: message.id,
-      result: message.result ? 'result-present' : undefined,
-      error: message.error,
-    })
-
-    transportToClient.send(message).catch(onClientError)
-  }
-
-  transportToClient.onclose = () => {
-    if (transportToServerClosed) {
-      return
-    }
-
-    transportToClientClosed = true
-    debugLog('Local transport closed, closing remote transport')
-    transportToServer.close().catch(onServerError)
-  }
-
-  transportToServer.onclose = () => {
-    if (transportToClientClosed) {
-      return
-    }
-    transportToServerClosed = true
-    debugLog('Remote transport closed, closing local transport')
-    transportToClient.close().catch(onClientError)
-  }
-
-  transportToClient.onerror = onClientError
-  transportToServer.onerror = onServerError
-
-  function onClientError(error: Error) {
-    log('Error from local client:', error)
-    debugLog('Error from local client', { stack: error.stack })
-  }
-
-  function onServerError(error: Error) {
-    log('Error from remote server:', error)
-    debugLog('Error from remote server', { stack: error.stack })
-  }
-}
-
-/**
- * Type for the auth initialization function
- */
-export type AuthInitializer = () => Promise<{
-  waitForAuthCode: () => Promise<string>
-  skipBrowserAuth: boolean
-}>
 
 /**
  * Creates and connects to a remote server with OAuth authentication
@@ -540,10 +339,6 @@ export function setupOAuthCallbackServerWithLongPoll(options: OAuthCallbackServe
  * @param options The server options
  * @returns An object with the server, authCode, and waitForAuthCode function
  */
-export function setupOAuthCallbackServer(options: OAuthCallbackServerOptions) {
-  const { server, authCode, waitForAuthCode } = setupOAuthCallbackServerWithLongPoll(options)
-  return { server, authCode, waitForAuthCode }
-}
 
 async function findExistingClientPort(serverUrlHash: string): Promise<number | undefined> {
   const clientInfo = await readJsonFile<OAuthClientInformationFull>(serverUrlHash, 'client_info.json', OAuthClientInformationFullSchema)
@@ -775,70 +570,4 @@ export async function parseCommandLineArgs(args: string[], usage: string) {
     ignoredTools,
     authTimeoutMs,
   }
-}
-
-/**
- * Sets up signal handlers for graceful shutdown
- * @param cleanup Cleanup function to run on shutdown
- */
-export function setupSignalHandlers(cleanup: () => Promise<void>) {
-  process.on('SIGINT', async () => {
-    log('\nShutting down...')
-    await cleanup()
-    process.exit(0)
-  })
-
-  // Keep the process alive
-  process.stdin.resume()
-  process.stdin.on('end', async () => {
-    log('\nShutting down...')
-    await cleanup()
-    process.exit(0)
-  })
-}
-
-/**
- * Generates a hash for the server URL to use in filenames
- * @param serverUrl The server URL to hash
- * @returns The hashed server URL
- */
-export function getServerUrlHash(serverUrl: string): string {
-  return crypto.createHash('md5').update(serverUrl).digest('hex')
-}
-
-/**
- * Converts a glob pattern to a regular expression
- * @param pattern The glob pattern (e.g., "create*", "*account")
- * @returns The corresponding regular expression
- */
-function patternToRegex(pattern: string): RegExp {
-  // Split by asterisks, escape each part, then join with .*
-  const parts = pattern.split('*')
-  const escapedParts = parts.map((part) => part.replace(/\W/g, '\\$&'))
-  const regexPattern = escapedParts.join('.*')
-  // Match the entire string from start to end, case-insensitive
-  return new RegExp(`^${regexPattern}$`, 'i')
-}
-
-/**
- * Determines if a tool name should be ignored based on ignore patterns
- * @param ignorePatterns Array of patterns to ignore (supports wildcards with *)
- * @param toolName The name of the tool to check
- * @returns false if the tool should be ignored (matches a pattern), true if it should be included
- */
-export function shouldIncludeTool(ignorePatterns: string[], toolName: string): boolean {
-  // If no patterns are provided, include all tools
-  if (!ignorePatterns || ignorePatterns.length === 0) {
-    return true
-  }
-
-  // Check if the tool name matches any ignore pattern
-  for (const pattern of ignorePatterns) {
-    const regex = patternToRegex(pattern)
-    if (regex.test(toolName)) {
-      return false // Tool matches an ignore pattern, so exclude it
-    }
-  }
-
-  return true // Tool doesn't match any ignore pattern, so include it
 }

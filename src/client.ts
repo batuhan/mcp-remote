@@ -15,14 +15,12 @@ import { ListResourcesResultSchema, ListToolsResultSchema } from '@modelcontextp
 import { NodeOAuthClientProvider } from 'mcp-remote/src/lib/node-oauth-client-provider'
 import {
   parseCommandLineArgs,
-  setupSignalHandlers,
-  log,
   MCP_REMOTE_VERSION,
-  getServerUrlHash,
   connectToRemoteServer,
-  TransportStrategy,
 } from './lib/utils'
-import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from './lib/types'
+import { log, TransportStrategy } from 'mcp-remote/src/lib/utils'
+import { setupSignalHandlers, getServerUrlHash } from 'mcp-remote/src/lib/utils'
+import { StaticOAuthClientInformationFull, StaticOAuthClientMetadata } from 'mcp-remote/src/lib/types'
 import { createLazyAuthCoordinator } from './lib/coordination'
 
 /**

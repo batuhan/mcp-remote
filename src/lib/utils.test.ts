@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { parseCommandLineArgs, shouldIncludeTool, mcpProxy, setupOAuthCallbackServerWithLongPoll } from './utils'
+import { parseCommandLineArgs, setupOAuthCallbackServerWithLongPoll } from './utils'
+import { mcpProxy } from 'mcp-remote/src/lib/utils'
+import { shouldIncludeTool } from 'mcp-remote/src/lib/utils'
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { EventEmitter } from 'events'
 import express from 'express'

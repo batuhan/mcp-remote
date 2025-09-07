@@ -4,7 +4,8 @@ import { Server } from 'http'
 import express from 'express'
 import { AddressInfo } from 'net'
 import { unlinkSync } from 'fs'
-import { log, debugLog, setupOAuthCallbackServerWithLongPoll } from './utils'
+import { log, debugLog } from 'mcp-remote/src/lib/utils'
+import { setupOAuthCallbackServerWithLongPoll } from './utils'
 
 export type AuthCoordinator = {
   initializeAuth: () => Promise<{ server: Server; waitForAuthCode: () => Promise<string>; skipBrowserAuth: boolean }>
